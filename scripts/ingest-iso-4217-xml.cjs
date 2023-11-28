@@ -1,48 +1,22 @@
 const fs = require("fs");
 const xml2js = require("xml2js");
 const util = require("util");
+const _ = require("lodash");
 
 require("@gouch/to-title-case");
 
 const outputPublishDateFile = "src/iso-4217-publish-date.ts";
 const outputTypesFile = "src/types.ts";
 
-function ingestEntry(entry) {
+function parseEntry(entry) {
   return {
-    code: entry.Ccy && entry.Ccy._,
-    number: entry.CcyNbr && entry.CcyNbr._,
+    code: entry.Ccy?._,
+    number: entry.CcyNbr?._,
     digits: (entry.CcyMnrUnts && parseInt(entry.CcyMnrUnts._)) || 0,
-    currency: entry.CcyNm && entry.CcyNm._,
-    countries:
-      (entry.CtryNm &&
-        entry.CtryNm._ && [entry.CtryNm._.toLowerCase().toTitleCase()]) ||
-      [],
+    currency: entry.CcyNm?._,
+    country: entry.CtryNm?._?.toLowerCase()?.toTitleCase(),
     withdraval: entry.WthdrwlDt?._,
   };
-}
-
-function ingestEntries(entries) {
-  const currenciesByCode = entries.map(ingestEntry).reduce(indexByCode, {});
-
-  const currencies = Object.values(currenciesByCode).filter(function (c) {
-    return !!c.code;
-  });
-  currencies.sort(compareCurrencyCode);
-
-  return currencies;
-}
-
-function indexByCode(index, c) {
-  if (!index[c.code]) {
-    index[c.code] = c;
-  } else {
-    index[c.code].countries = index[c.code].countries.concat(c.countries);
-  }
-  return index;
-}
-
-function compareCurrencyCode(a, b) {
-  return a.code.localeCompare(b.code);
 }
 
 async function processFile(name) {
@@ -57,11 +31,14 @@ async function processFile(name) {
   });
 
   const isoRoot = result.ISO_4217;
+  const entries = isoRoot.CcyTbl
+    ? isoRoot.CcyTbl.CcyNtry
+    : isoRoot.HstrcCcyTbl.HstrcCcyNtry;
 
   return {
-    entries: ingestEntries(
-      isoRoot.CcyTbl ? isoRoot.CcyTbl.CcyNtry : isoRoot.HstrcCcyTbl.HstrcCcyNtry
-    ),
+    entries: entries
+      .map((entry) => parseEntry(entry))
+      .filter((entry) => entry.code),
     publishDate: isoRoot.Pblshd,
   };
 }
@@ -83,8 +60,8 @@ async function writeData(countries, preamble, outputDataFile) {
   // TypeScript style export and added type
   const dataContent =
     preamble +
-    'import { CurrencyCodeRecord } from "./types";\n' + // Explicitly import type
-    "const data: CurrencyCodeRecord[] = " +
+    'import { CurrencyCodeEntry } from "./types";\n' + // Explicitly import type
+    "const data: CurrencyCodeEntry[] = " +
     JSON.stringify(countries, null, "  ") +
     ";\n" +
     "export default data;";
@@ -108,24 +85,35 @@ async function writePublishDate(publishDate, preamble) {
 
 async function writeTypes(entries) {
   // Prepare content for CurrencyCode type
-  const currencyCodes = entries.map((c) => JSON.stringify(c.code)).join(" | ");
+  const currencyCodes = _.sortBy(_.uniq(entries.map((c) => c.code)))
+    .map((code) => JSON.stringify(code))
+    .join(" | ");
 
   // Prepare content for Country type
-  const countryNames = [...new Set(entries.flatMap((c) => c.countries))]
+  const countryNames = _.sortBy(_.uniq(entries.map((c) => c.country)))
     .map((country) => JSON.stringify(country))
     .join(" | ");
 
   const typesContent = `// Types generated based on ISO 4217 currency codes and countries
 export type CurrencyCode = ${currencyCodes};
 export type Country = ${countryNames};
+
 export interface CurrencyCodeRecord {
   code: CurrencyCode;
   number?: string;
   digits: number;
   currency: string;
   countries: Country[];
+};
+
+export interface CurrencyCodeEntry {
+  code: CurrencyCode;
+  number?: string;
+  digits: number;
+  currency: string;
+  country: Country;
   withdraval?: string;
-}`;
+};`;
 
   await fs.promises.writeFile(outputTypesFile, typesContent);
 
@@ -144,7 +132,11 @@ async function ingest() {
   const preamble = generatePreamble(publishDate);
 
   await writeData(currentEntries, preamble, "src/data.ts");
-  await writeData(historicalEntries, preamble, "src/data-historical.ts");
+  await writeData(
+    _.reverse(_.sortBy(historicalEntries, "withdrawal")),
+    preamble,
+    "src/data-historical.ts"
+  );
   await writePublishDate(publishDate, preamble);
   await writeTypes(allEntries);
 }

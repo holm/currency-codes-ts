@@ -1,41 +1,58 @@
 import _ from "lodash";
-import data from "./data.js";
-import dataHistorical from "./data-historical.js";
+import currentEntries from "./data.js";
+import historicalEntries from "./data-historical.js";
 import publishDate from "./iso-4217-publish-date.js";
-import { CurrencyCode, CurrencyCodeRecord } from "./types";
+import { CurrencyCode, CurrencyCodeEntry, CurrencyCodeRecord } from "./types";
 
 export type CurrencyOptions = {
   historical?: boolean | string;
 };
 
-const resolveRecords = ({ historical = false }: CurrencyOptions = {}) => {
+const resolveEntries = ({
+  historical = false,
+}: CurrencyOptions = {}): CurrencyCodeEntry[] => {
   if (!historical) {
-    return data;
+    return currentEntries;
   }
 
-  const indexed = _.fromPairs(data.map((data) => [data.code, data]));
+  const filteredHistorical = historicalEntries.filter(
+    (entry) =>
+      historical === true ||
+      (entry.withdraval && entry.withdraval >= historical)
+  );
 
-  for (const entry of dataHistorical) {
-    if (
-      historical !== true &&
-      entry.withdraval &&
-      entry.withdraval < historical
-    ) {
-      continue;
-    }
+  return [...currentEntries, ...filteredHistorical];
+};
 
-    const existingEntry = indexed[entry.code];
-    if (existingEntry) {
-      indexed[entry.code] = {
-        ...existingEntry,
-        countries: _.uniq([...existingEntry.countries, ...entry.countries]),
-      };
-    } else {
-      indexed[entry.code] = entry;
-    }
+const resolveEntriesByCode = _.memoize(
+  (options?: CurrencyOptions): Record<string, CurrencyCodeEntry[]> => {
+    const entries = resolveEntries(options);
+
+    return _.groupBy(entries, (entry) => entry.code);
   }
+);
 
-  return _.sortBy(_.values(indexed), "code");
+const resolveEntriesByCountry = _.memoize(
+  (options?: CurrencyOptions): Record<string, CurrencyCodeEntry[]> => {
+    const entries = resolveEntries(options);
+
+    return _.groupBy(entries, (entry) => entry.country.toLowerCase());
+  }
+);
+
+const resolveEntriesByNumber = _.memoize(
+  (options?: CurrencyOptions): Record<string, CurrencyCodeEntry[]> => {
+    const entries = resolveEntries(options).filter((entry) => entry.number);
+
+    return _.groupBy(entries, (entry) => entry.number);
+  }
+);
+
+const entriesToRecord = (entries: CurrencyCodeEntry[]): CurrencyCodeRecord => {
+  return {
+    ..._.pick(entries[0], ["code", "number", "digits", "currency"]),
+    countries: _.uniq(_.map(entries, "country")),
+  };
 };
 
 /**
@@ -48,29 +65,27 @@ export const code = (
   code: string,
   options?: CurrencyOptions
 ): CurrencyCodeRecord | undefined => {
-  code = code.toUpperCase();
-  const records = resolveRecords(options);
+  const groupedEntries = resolveEntriesByCode(options);
 
-  return _.find(records, (c) => c.code === code);
+  const matchingEntries = groupedEntries[code.toLocaleUpperCase()];
+  if (matchingEntries) {
+    return entriesToRecord(matchingEntries);
+  }
 };
 
 /**
  * Retrieve the currency details by the name of the country.
  *
  * @param {string} country - The name of the country.
- * @returns {CurrencyCodeRecord[]} - An array of currency records that match the country name.
+ * @returns {CurrencyCodeEntry[]} - An array of currency entries that match the country name.
  */
 export const country = (
   country: string,
   options?: CurrencyOptions
-): CurrencyCodeRecord[] => {
-  const lowerCountry = country.toLowerCase();
-  const records = resolveRecords(options);
+): CurrencyCodeEntry[] => {
+  const groupedEntries = resolveEntriesByCountry(options);
 
-  return records.filter(({ countries }) => {
-    if (!countries) return false;
-    return countries.some((c) => c.toLowerCase() === lowerCountry);
-  });
+  return groupedEntries[country.toLowerCase()] || [];
 };
 
 /**
@@ -83,9 +98,12 @@ export const number = (
   number: number | string,
   options?: CurrencyOptions
 ): CurrencyCodeRecord | undefined => {
-  const records = resolveRecords(options);
+  const groupedEntries = resolveEntriesByNumber(options);
 
-  return _.find(records, (c) => c.number === String(number));
+  const matchingEntries = groupedEntries[String(number)];
+  if (matchingEntries) {
+    return entriesToRecord(matchingEntries);
+  }
 };
 
 /**
@@ -94,9 +112,9 @@ export const number = (
  * @returns {CurrencyCode[]} - An array of ISO 4217 currency codes.
  */
 export const codes = (options?: CurrencyOptions): CurrencyCode[] => {
-  const records = resolveRecords(options);
+  const groupedEntries = resolveEntriesByCode(options);
 
-  return records.map(({ code }) => code);
+  return _.keys(groupedEntries) as CurrencyCode[];
 };
 
 /**
@@ -105,11 +123,9 @@ export const codes = (options?: CurrencyOptions): CurrencyCode[] => {
  * @returns {string[]} - An array of ISO 4217 currency numbers.
  */
 export const numbers = (options?: CurrencyOptions): string[] => {
-  const records = resolveRecords(options);
+  const groupedEntries = resolveEntriesByNumber(options);
 
-  return records
-    .map((c) => c.number)
-    .filter((n) => n !== undefined && n !== null) as string[];
+  return _.keys(groupedEntries);
 };
 
 /**
@@ -118,13 +134,16 @@ export const numbers = (options?: CurrencyOptions): string[] => {
  * @returns {string[]} - An array of country names.
  */
 export const countries = (options?: CurrencyOptions): string[] => {
-  const records = resolveRecords(options);
+  const groupedEntries = resolveEntriesByCountry(options);
 
-  const countryArrays = records
-    .filter((c: CurrencyCodeRecord) => c.countries)
-    .map((c: CurrencyCodeRecord) => c.countries);
-  return _.uniq(_.flatten(countryArrays));
+  return _.keys(groupedEntries);
 };
+
+const data = _.values(resolveEntriesByCode()).map((entries) =>
+  entriesToRecord(entries)
+);
+
+export { data };
 
 export default {
   code,
@@ -135,5 +154,4 @@ export default {
   countries,
   publishDate,
   data,
-  dataHistorical,
 };

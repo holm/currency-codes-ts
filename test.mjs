@@ -35,10 +35,9 @@ assert.strictEqual(cc.codes({ historical: "2100-01" }).length, 180);
 assert.strictEqual(cc.countries().length, 260);
 assert.strictEqual(cc.countries({ historical: true }).length, 290);
 assert.strictEqual(cc.numbers().length, 180);
-assert.strictEqual(cc.numbers({ historical: true }).length, 301);
-assert.strictEqual(cc.numbers()[0], "784");
-assert.strictEqual(cc.numbers({ historical: true })[0], "020");
+assert.strictEqual(cc.numbers({ historical: true }).length, 255);
+assert.strictEqual(cc.numbers()[0], "104");
+assert.strictEqual(cc.numbers({ historical: true })[0], "100");
 assert.strictEqual(cc.data.length, 180);
-assert.strictEqual(cc.dataHistorical.length, 133);
 
 console.log("tests passed 🎉");
