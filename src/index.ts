@@ -5,12 +5,19 @@ import publishDate from "./iso-4217-publish-date.js";
 import { CurrencyCode, CurrencyCodeRecord } from "./types";
 
 export type CurrencyOptions = {
-  historical?: boolean;
+  historical?: boolean | string;
 };
 
 const resolveRecords = ({ historical = false }: CurrencyOptions = {}) => {
-  if (historical) {
+  if (historical === true) {
     return [...data, ...dataHistorical];
+  } else if (historical) {
+    return [
+      ...data,
+      ...dataHistorical.filter(
+        (entry) => entry.withdraval && entry.withdraval >= historical
+      ),
+    ];
   } else {
     return data;
   }
