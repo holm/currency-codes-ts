@@ -9,18 +9,33 @@ export type CurrencyOptions = {
 };
 
 const resolveRecords = ({ historical = false }: CurrencyOptions = {}) => {
-  if (historical === true) {
-    return [...data, ...dataHistorical];
-  } else if (historical) {
-    return [
-      ...data,
-      ...dataHistorical.filter(
-        (entry) => entry.withdraval && entry.withdraval >= historical
-      ),
-    ];
-  } else {
+  if (!historical) {
     return data;
   }
+
+  const indexed = _.fromPairs(data.map((data) => [data.code, data]));
+
+  for (const entry of dataHistorical) {
+    if (
+      historical !== true &&
+      entry.withdraval &&
+      entry.withdraval < historical
+    ) {
+      continue;
+    }
+
+    const existingEntry = indexed[entry.code];
+    if (existingEntry) {
+      indexed[entry.code] = {
+        ...existingEntry,
+        countries: _.uniq([...existingEntry.countries, ...entry.countries]),
+      };
+    } else {
+      indexed[entry.code] = entry;
+    }
+  }
+
+  return _.sortBy(_.values(indexed), "code");
 };
 
 /**
